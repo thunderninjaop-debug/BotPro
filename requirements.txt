@@ -1,0 +1,7 @@
+aiohttp
+aiosqlite
+Telethon
+requests
+qrcode[pil]
+Pillow
+python-dotenv
