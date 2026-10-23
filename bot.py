@@ -156,7 +156,18 @@ class _TelegramInlineKeyboardButton:
 
     def to_tl(self):
         if self.web_app:
-            return tl_types.KeyboardButtonWebView(text=self.text, url=self.web_app.url)
+            # Telethon does not expose Bot API's KeyboardButtonWebView on all layers.
+            # Use a normal URL button as a compatibility fallback; the dedicated
+            # Mini App entry point is configured via BotMenuButton below.
+            webview_cls = getattr(tl_types, "KeyboardButtonWebView", None)
+            if webview_cls is not None:
+                try:
+                    return webview_cls(text=self.text, url=self.web_app.url)
+                except Exception:
+                    pass
+            return tl_types.KeyboardButtonUrl(
+                text=self.text, url=self.web_app.url,
+                **_tl_style_kwargs(tl_types.KeyboardButtonUrl, self.style))
         if self.url:
             return tl_types.KeyboardButtonUrl(
                 text=self.text, url=self.url,
@@ -176,10 +187,34 @@ class _TelegramKeyboardButton:
 
     def to_tl(self):
         if self.web_app:
-            return tl_types.KeyboardButtonSimpleWebView(text=self.text, url=self.web_app.url)
-        return tl_types.KeyboardButton(
-            text=self.text,
-            **_tl_style_kwargs(tl_types.KeyboardButton, self.style))
+            # Reply-keyboard Mini App buttons are not supported by every Telethon TL layer.
+            # Keep the menu usable on all layers; the inline/menu URL entry points open the app.
+            type_cls = getattr(tl_types, "KeyboardButtonTypeText", None)
+            if type_cls is not None:
+                return tl_types.KeyboardButton(
+                    text=self.text, type=type_cls(),
+                    **_tl_style_kwargs(tl_types.KeyboardButton, self.style))
+            return tl_types.KeyboardButton(text=self.text)
+        # Current Telethon layers may require an explicit KeyboardButtonType.
+        button_cls = getattr(tl_types, "KeyboardButton", None)
+        if button_cls is None:
+            raise RuntimeError("Installed Telethon does not provide KeyboardButton")
+        kwargs = _tl_style_kwargs(button_cls, self.style)
+        try:
+            return button_cls(text=self.text, **kwargs)
+        except TypeError as exc:
+            if "type" not in str(exc):
+                raise
+            type_cls = getattr(tl_types, "KeyboardButtonTypeText", None)
+            if type_cls is None:
+                # Try a compatible plain-text button type from alternate schema naming.
+                type_cls = getattr(tl_types, "KeyboardButtonTypeRequestPhone", None)
+            if type_cls is None:
+                raise RuntimeError(
+                    "Incompatible Telethon TL schema: KeyboardButton requires a type, "
+                    "but KeyboardButtonTypeText is unavailable. Reinstall requirements.txt."
+                ) from exc
+            return button_cls(text=self.text, type=type_cls(), **kwargs)
 
 
 class InlineKeyboardMarkup:
@@ -805,15 +840,15 @@ def KeyboardButton(*args, **kwargs):
 # ---------------------------------------------------------------------------
 # 1. CONFIGURATION
 # ---------------------------------------------------------------------------
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8963617329:AAH9gWdq0GWV8vXbw_uSSuy8dFJKWa9f6f4").strip()
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8963617329:AAGEvTJDuXUqYI4Fdcb_c60pFq8_sPhccMg").strip()
 API_ID = int(os.getenv("API_ID", "34098472") or 0)
 API_HASH = os.getenv("API_HASH", "eb67cebd80cec5c397eb80b4cf4193b4").strip()
 SESSION_NAME = os.getenv("SESSION_NAME", "smm_bot_session")
 # Mini App web server. WEBAPP_URL must be the public HTTPS address that points to this server
 # (reverse proxy / tunnel -> WEBAPP_HOST:WEBAPP_PORT). It can also be changed from the DB setting WEBAPP_URL.
-WEBAPP_URL = os.getenv("WEBAPP_URL", "https://vericelapso.vercel.app/").strip()
+WEBAPP_URL = os.getenv("WEBAPP_URL", "https://vericelapso.vercel.app").strip()
 WEBAPP_HOST = os.getenv("WEBAPP_HOST", "0.0.0.0")
-WEBAPP_PORT = int(os.getenv("WEBAPP_PORT", os.getenv("PORT", "6679")) or 8080)
+WEBAPP_PORT = int(os.getenv("WEBAPP_PORT", os.getenv("PORT", "8080")) or 8080)
 WEBAPP_PUBLIC_URL = WEBAPP_URL
 ADMIN_IDS = [int(x.strip()) for x in os.getenv("ADMIN_IDS", "8363262755").split(",") if x.strip()]
 DB_PATH = os.getenv("DB_PATH", "smm_reseller.db")
